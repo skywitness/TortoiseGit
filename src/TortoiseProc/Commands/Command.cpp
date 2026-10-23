@@ -79,6 +79,7 @@
 #include "RegisterWin11ContextMenu.h"
 #include "FirstStartWizardCommand.h"
 #include "InaccessibleCommand.h"
+#include "LogTabHostCommand.h"
 #if 0
 #include "CrashCommand.h"
 #include "RebuildIconCacheCommand.h"
@@ -164,6 +165,7 @@ enum TGitCommand
 	cmdRegisterWin11ContextMenu,
 	cmdInaccessible,
 	cmdFirstStartWizard,
+	cmdLogTabHost,
 };
 
 static constexpr struct CommandInfo
@@ -246,6 +248,7 @@ static constexpr struct CommandInfo
 	{	cmdRegisterWin11ContextMenu,	L"registerwin11contextmenu"	},
 	{	cmdInaccessible,	L"inaccessible"		},
 	{	cmdFirstStartWizard,L"firststart"		},
+	{	cmdLogTabHost,		L"logtabhost"		},
 };
 
 constexpr bool AllCommandNamesAreUnique()
@@ -430,6 +433,8 @@ Command* CommandServer::CreateRawCommand(const CString& sCmd)
 		return new RTFMCommand;
 	case cmdFirstStartWizard:
 		return new FirstStartWizardCommand;
+	case cmdLogTabHost:
+		return new LogTabHostCommand;
 #if 0
 	case cmdCrash:
 		return new CrashCommand;

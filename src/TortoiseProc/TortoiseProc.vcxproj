@@ -214,8 +214,10 @@
     <ClCompile Include="GitLogListBase.cpp" />
     <ClCompile Include="lanes.cpp" />
     <ClCompile Include="Commands\LogCommand.cpp" />
+    <ClCompile Include="Commands\LogTabHostCommand.cpp" />
     <ClCompile Include="LogDataVector.cpp" />
     <ClCompile Include="LogDlg.cpp" />
+    <ClCompile Include="LogTabHost.cpp" />
     <ClCompile Include="LoglistUtils.cpp" />
     <ClCompile Include="StagingOperations.cpp" />
     <ClCompile Include="StatGraphDlg.cpp" />
@@ -536,7 +538,9 @@
     <ClInclude Include="GitLogListBase.h" />
     <ClInclude Include="lanes.h" />
     <ClInclude Include="Commands\LogCommand.h" />
+    <ClInclude Include="Commands\LogTabHostCommand.h" />
     <ClInclude Include="LogDlg.h" />
+    <ClInclude Include="LogTabHost.h" />
     <ClInclude Include="LogDlgHelper.h" />
     <ClInclude Include="LoglistUtils.h" />
     <ClInclude Include="StagingOperations.h" />

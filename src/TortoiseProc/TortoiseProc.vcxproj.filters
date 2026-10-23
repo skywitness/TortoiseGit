@@ -263,10 +263,16 @@
     <ClCompile Include="Commands\LogCommand.cpp">
       <Filter>Commands\Log</Filter>
     </ClCompile>
+    <ClCompile Include="Commands\LogTabHostCommand.cpp">
+      <Filter>Commands\Log</Filter>
+    </ClCompile>
     <ClCompile Include="LogDataVector.cpp">
       <Filter>Commands\Log</Filter>
     </ClCompile>
     <ClCompile Include="LogDlg.cpp">
+      <Filter>Commands\Log</Filter>
+    </ClCompile>
+    <ClCompile Include="LogTabHost.cpp">
       <Filter>Commands\Log</Filter>
     </ClCompile>
     <ClCompile Include="LoglistUtils.cpp">
@@ -1138,7 +1144,13 @@
     <ClInclude Include="Commands\LogCommand.h">
       <Filter>Commands\Log</Filter>
     </ClInclude>
+    <ClInclude Include="Commands\LogTabHostCommand.h">
+      <Filter>Commands\Log</Filter>
+    </ClInclude>
     <ClInclude Include="LogDlg.h">
+      <Filter>Commands\Log</Filter>
+    </ClInclude>
+    <ClInclude Include="LogTabHost.h">
       <Filter>Commands\Log</Filter>
     </ClInclude>
     <ClInclude Include="LogDlgHelper.h">

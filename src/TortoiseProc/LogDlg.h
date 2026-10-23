@@ -40,6 +40,7 @@
 #define LOG_FILLPATCHVTIMER	103
 #define LOG_HEADER_ORDER_TIMER 104
 #define FILEFILTER_TIMER	105
+#define LOG_TABHOST_TIMER	106
 
 using GENERICCOMPAREFN = int(__cdecl *)(const void* elem1, const void* elem2);
 
@@ -71,6 +72,8 @@ public:
 	void ContinuousSelection(bool bCont = true) {m_bSelectionMustBeContinuous = bCont;}
 	void SingleSelection(bool bSingle = true) {m_bSelectionMustBeSingle = bSingle;}
 	void ShowWorkingTreeChanges(bool bShow = false) { m_bShowWC = bShow; }
+	/// show the dialog as a tab of the given log tab host window (see LogTabHost.h), must be called before DoModal()
+	void SetTabHost(HWND hTabHost) { m_hTabHost = hTabHost; }
 	void SetRange(const CString& range);
 	void ShowStartRef();
 	afx_msg LRESULT OnRefLogChanged(WPARAM wParam, LPARAM lParam);
@@ -149,6 +152,9 @@ protected:
 	afx_msg void OnEnChangeFileFilter();
 	afx_msg void OnEnscrollMsgview();
 	afx_msg LRESULT OnResetWcRev(WPARAM, LPARAM);
+	afx_msg LRESULT OnLogTabHostMessage(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
+	afx_msg void OnDestroy();
 
 	void OnCancel() override;
 	void OnOK() override;
@@ -199,7 +205,8 @@ private:
 
 	CPatchViewDlg		m_patchViewdlg;
 	void FillPatchView(bool onlySetTimer = false);
-	CWnd* GetPatchViewParentWnd() override { return this; }
+	// when shown as a tab, align the patch view to the tab host window
+	CWnd* GetPatchViewParentWnd() override { return m_hTabHost ? CWnd::FromHandle(m_hTabHost) : this; }
 	void TogglePatchView() override;
 	LRESULT OnFileListCtrlItemChanged(WPARAM /*wparam*/, LPARAM /*lparam*/);
 	afx_msg LRESULT	OnGitStatusListCtrlNeedsRefresh(WPARAM, LPARAM);
@@ -207,6 +214,10 @@ private:
 	afx_msg void OnSizing(UINT fwSide, LPRECT pRect);
 
 	LRESULT DefWindowProc(UINT message, WPARAM wParam, LPARAM lParam) override;
+
+	bool AttachToTabHost();
+	void DetachFromTabHost(bool bMakeTopLevel);
+	HWND				m_hTabHost = nullptr;	// log tab host window this dialog is shown in as a tab, if any
 
 	CString				m_sRelativeRoot;
 	CString				m_sRepositoryRoot;

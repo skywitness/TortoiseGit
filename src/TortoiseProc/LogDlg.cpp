@@ -32,6 +32,7 @@
 #include "ClipboardHelper.h"
 #include "DPIAware.h"
 #include "LogDlgFileFilter.h"
+#include "LogTabHost.h"
 
 #define MIN_CTRL_HEIGHT (CDPIAware::Instance().ScaleY(GetSafeHwnd(), 20))
 #define MIN_SPLITTER_HEIGHT (CDPIAware::Instance().ScaleY(GetSafeHwnd(), 10))
@@ -175,6 +176,9 @@ BEGIN_MESSAGE_MAP(CLogDlg, CResizableStandAloneDialog)
 	ON_REGISTERED_MESSAGE(CGitStatusListCtrl::GITSLNM_ITEMCHANGED, &CLogDlg::OnFileListCtrlItemChanged)
 	ON_REGISTERED_MESSAGE(CGitStatusListCtrl::GITSLNM_NEEDSREFRESH, OnGitStatusListCtrlNeedsRefresh)
 	ON_REGISTERED_MESSAGE(CGitLogListBase::LOGLIST_RESET_WCREV, OnResetWcRev)
+	ON_REGISTERED_MESSAGE(WM_TGIT_LOGTAB, OnLogTabHostMessage)
+	ON_WM_WINDOWPOSCHANGED()
+	ON_WM_DESTROY()
 	ON_WM_MOVE()
 	ON_WM_MOVING()
 	ON_WM_SIZING()
@@ -378,9 +382,13 @@ BOOL CLogDlg::OnInitDialog()
 	m_JumpUp.SetIcon(CCommonAppUtils::LoadIconEx(IDI_JUMPUP, iconWidth, iconHeight));
 	m_JumpDown.SetIcon(CCommonAppUtils::LoadIconEx(IDI_JUMPDOWN, iconWidth, iconHeight));
 
-	if (GetExplorerHWND())
-		CenterWindow(CWnd::FromHandle(GetExplorerHWND()));
-	EnableSaveRestore(L"LogDlg");
+	// as a tab, the size is determined by the tab host window and must not be stored as the size of the standalone dialog
+	if (!AttachToTabHost())
+	{
+		if (GetExplorerHWND())
+			CenterWindow(CWnd::FromHandle(GetExplorerHWND()));
+		EnableSaveRestore(L"LogDlg");
+	}
 	SetTheme(CTheme::Instance().IsDarkTheme());
 
 	DWORD yPos1 = CDPIAware::Instance().ScaleY(GetSafeHwnd(), CRegDWORD(L"Software\\TortoiseGit\\TortoiseProc\\ResizableState\\LogDlgSizer1"));
@@ -1283,6 +1291,8 @@ void CLogDlg::SaveSplitterPos()
 
 void CLogDlg::OnCancel()
 {
+	// let the tab host switch to another tab right away
+	DetachFromTabHost(true);
 	this->ShowWindow(SW_HIDE);
 
 	// canceling means stopping the working thread if it's still running.
@@ -1295,6 +1305,125 @@ void CLogDlg::OnCancel()
 
 	SaveSplitterPos();
 	__super::OnCancel();
+}
+
+bool CLogDlg::AttachToTabHost()
+{
+	if (!m_hTabHost)
+		return false;
+
+	// turn the (still invisible) dialog into a child window of the host window, which lives in another process
+	const DWORD style = GetStyle();
+	const DWORD exStyle = GetExStyle();
+	// DS_NOIDLEMSG: the modal loop must not send WM_ENTERIDLE to the parent (i.e., the host) all the time
+	ModifyStyle(WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX, WS_CHILD | DS_NOIDLEMSG);
+	ModifyStyleEx(WS_EX_APPWINDOW | WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE, 0);
+	::SetParent(m_hWnd, m_hTabHost);
+	SetWindowPos(nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	SetSizeGripVisibility(FALSE);
+	UpdateSizeGrip();
+
+	LogTabHost::RegisterTabData data{};
+	data.cbSize = sizeof(data);
+	const CSize minSize = GetMinTrackSize();
+	data.minWidth = minSize.cx;
+	data.minHeight = minSize.cy;
+	CString repoRoot(g_Git.m_CurrentDir);
+	repoRoot.TrimRight(L'\\');
+	CString label(PathFindFileName(repoRoot));
+	if (!m_path.IsEmpty())
+		label += L" (" + m_path.GetFileOrDirectoryName() + L')';
+	wcsncpy_s(data.label, label, _TRUNCATE);
+	wcsncpy_s(data.path, g_Git.m_CurrentDir, _TRUNCATE);
+
+	// allow the host to come to the foreground, we got the permission from the explorer
+	DWORD hostProcessId = 0;
+	::GetWindowThreadProcessId(m_hTabHost, &hostProcessId);
+	::AllowSetForegroundWindow(hostProcessId);
+
+	COPYDATASTRUCT cds = { LogTabHost::COPYDATA_REGISTERTAB, static_cast<DWORD>(sizeof(data)), &data };
+	DWORD_PTR result = FALSE;
+	if (::SendMessageTimeout(m_hTabHost, WM_COPYDATA, reinterpret_cast<WPARAM>(m_hWnd), reinterpret_cast<LPARAM>(&cds), SMTO_ABORTIFHUNG, 10000, &result) && result)
+	{
+		// the host has the taskbar button
+		m_pTaskbarList.Release();
+		SetTimer(LOG_TABHOST_TIMER, 2000, nullptr);
+		return true;
+	}
+
+	// fall back to a standalone dialog
+	::SetParent(m_hWnd, nullptr);
+	::SetWindowLong(m_hWnd, GWL_STYLE, static_cast<LONG>(style));
+	::SetWindowLong(m_hWnd, GWL_EXSTYLE, static_cast<LONG>(exStyle));
+	SetWindowPos(nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	SetSizeGripVisibility(TRUE);
+	UpdateSizeGrip();
+	m_hTabHost = nullptr;
+	return false;
+}
+
+void CLogDlg::DetachFromTabHost(bool bMakeTopLevel)
+{
+	if (!m_hTabHost)
+		return;
+
+	KillTimer(LOG_TABHOST_TIMER);
+	// the patch view is owned by the host window (owners are always top level windows),
+	// so it would not get destroyed together with this dialog
+	if (::IsWindow(m_patchViewdlg.m_hWnd))
+		m_patchViewdlg.DestroyWindow();
+	if (bMakeTopLevel)
+	{
+		// the host closes as soon as its last tab is gone, it must not have to destroy a window of this process
+		ShowWindow(SW_HIDE);
+		::SetParent(m_hWnd, nullptr);
+		ModifyStyle(WS_CHILD, WS_POPUP);
+	}
+	::PostMessage(m_hTabHost, WM_TGIT_LOGTAB, LogTabHost::CMD_UNREGISTERTAB, reinterpret_cast<LPARAM>(m_hWnd));
+	m_hTabHost = nullptr;
+}
+
+LRESULT CLogDlg::OnLogTabHostMessage(WPARAM wParam, LPARAM lParam)
+{
+	if (!m_hTabHost)
+		return 0;
+
+	if (wParam == LogTabHost::CMD_FOCUS)
+	{
+		// keep the focus if the user clicked into this dialog to activate the host window
+		if (HWND hFocus = ::GetFocus(); !IsWindowVisible() || (hFocus && ::IsChild(m_hWnd, hFocus)))
+			return 0;
+		const auto hLastFocus = reinterpret_cast<HWND>(lParam);
+		if (hLastFocus && ::IsChild(m_hWnd, hLastFocus) && ::IsWindowVisible(hLastFocus) && ::IsWindowEnabled(hLastFocus))
+			::SetFocus(hLastFocus);
+		else
+			m_LogList.SetFocus();
+	}
+	else if (wParam == LogTabHost::CMD_HOSTMOVED)
+	{
+		if (::IsWindow(m_patchViewdlg.m_hWnd) && m_patchViewdlg.IsWindowVisible())
+			m_patchViewdlg.ShowAndAlignToParent();
+	}
+	return 0;
+}
+
+void CLogDlg::OnWindowPosChanged(WINDOWPOS* lpwndpos)
+{
+	__super::OnWindowPosChanged(lpwndpos);
+
+	// as a tab, the patch view has to follow the visibility of this dialog
+	if (!m_hTabHost || !::IsWindow(m_patchViewdlg.m_hWnd))
+		return;
+	if (lpwndpos->flags & SWP_HIDEWINDOW)
+		m_patchViewdlg.ShowWindow(SW_HIDE);
+	else if (lpwndpos->flags & SWP_SHOWWINDOW)
+		m_patchViewdlg.ShowAndAlignToParent();
+}
+
+void CLogDlg::OnDestroy()
+{
+	DetachFromTabHost(false);
+	__super::OnDestroy();
 }
 
 void CLogDlg::CopyChangedSelectionToClipBoard()
@@ -1775,6 +1904,26 @@ void CLogDlg::JumpToGitHash(CString hash)
 
 BOOL CLogDlg::PreTranslateMessage(MSG* pMsg)
 {
+	// shortcuts of the log tab host, the keyboard focus is in this dialog (i.e., another thread than the host)
+	if (m_hTabHost && pMsg->message == WM_KEYDOWN && GetKeyState(VK_CONTROL) < 0 && GetKeyState(VK_MENU) >= 0 && (pMsg->hwnd == m_hWnd || ::IsChild(m_hWnd, pMsg->hwnd)))
+	{
+		if (pMsg->wParam == VK_TAB)
+		{
+			::PostMessage(m_hTabHost, WM_TGIT_LOGTAB, GetKeyState(VK_SHIFT) < 0 ? LogTabHost::CMD_PREVTAB : LogTabHost::CMD_NEXTTAB, 0);
+			return TRUE;
+		}
+		if (pMsg->wParam == 'W' || pMsg->wParam == VK_F4)
+		{
+			PostMessage(WM_CLOSE);
+			return TRUE;
+		}
+		if (pMsg->wParam >= '1' && pMsg->wParam <= '9' && GetKeyState(VK_SHIFT) >= 0)
+		{
+			::PostMessage(m_hTabHost, WM_TGIT_LOGTAB, LogTabHost::CMD_SELECTTAB, pMsg->wParam == '9' ? -1 : static_cast<LPARAM>(pMsg->wParam - '1'));
+			return TRUE;
+		}
+	}
+
 	// Skip Ctrl-C when copying text out of the log message or search filter
 	const bool bSkipAccelerator = (pMsg->message == WM_KEYDOWN && (pMsg->wParam == 'C' || pMsg->wParam == VK_INSERT) && (GetFocus() == GetDlgItem(IDC_MSGVIEW) || GetFocus() == GetDlgItem(IDC_SEARCHEDIT) || GetFocus() == GetDlgItem(IDC_FILTER)) && GetKeyState(VK_CONTROL) & 0x8000);
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam=='\r')
@@ -2487,6 +2636,17 @@ void CLogDlg::OnTimer(UINT_PTR nIDEvent)
 	{
 		KillTimer(FILEFILTER_TIMER);
 		FillLogMessageCtrl();
+	}
+	else if (nIDEvent == LOG_TABHOST_TIMER)
+	{
+		// the tab host is gone (e.g., crashed), do not stay around as an invisible child window
+		if (m_hTabHost && !::IsWindow(m_hTabHost))
+		{
+			KillTimer(LOG_TABHOST_TIMER);
+			m_hTabHost = nullptr;
+			OnCancel();
+			return;
+		}
 	}
 	DialogEnableWindow(IDC_STATBUTTON, !((IsThreadRunning() || (m_LogList.m_arShownList.empty() || m_LogList.m_arShownList.size() == 1 && m_LogList.m_bShowWC))));
 	__super::OnTimer(nIDEvent);

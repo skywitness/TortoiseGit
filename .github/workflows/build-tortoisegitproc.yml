@@ -1,0 +1,44 @@
+name: Build TortoiseGitProc
+
+# Compiles TortoiseGitProc.exe (incl. the log dialog tabs) on Windows,
+# same steps as the TortoiseGitProc part of appveyor.yml.
+on:
+  push:
+    branches:
+      - 'claude/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64]
+        configuration: [Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch submodules
+        run: git submodule update --init --jobs 8 -- ext/libgit2 ext/simpleini ext/tgit ext/zlib ext/pcre2 ext/json ext/apr ext/apr-util ext/editorconfig ext/lexilla ext/OGDF ext/hunspell ext/Detours
+
+      - name: Apply libgit2 patches
+        shell: cmd
+        run: |
+          cd ext\libgit2
+          git config user.email "dummy@example.com"
+          git config user.name "Dummy Name"
+          for %%G in (..\libgit2-*.patch) do ( type %%G | git am || exit /b 1 )
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build TortoiseGitProc
+        run: msbuild src\TortoiseGit.sln /t:TortoiseGitProc /m /verbosity:minimal /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TortoiseGitProc-${{ matrix.configuration }}-${{ matrix.platform }}
+          path: |
+            bin/**/bin/*.exe
+            bin/**/bin/*.dll
+          if-no-files-found: warn

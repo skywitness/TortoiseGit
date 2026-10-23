@@ -21,6 +21,7 @@
 #include "LogCommand.h"
 #include "StringUtils.h"
 #include "LogDlg.h"
+#include "LogTabHost.h"
 
 bool LogCommand::Execute()
 {
@@ -89,6 +90,8 @@ bool LogCommand::Execute()
 		dlg.SetSelect(true);
 		dlg.SingleSelection(true);
 	}
+	else if (!parser.HasKey(L"notabs") && LogTabHost::ShouldOpenAsTab())
+		dlg.SetTabHost(LogTabHost::FindOrStartHost());
 	dlg.DoModal();
 	if (parser.HasVal(L"outfile"))
 	{
